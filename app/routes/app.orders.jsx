@@ -1,70 +1,61 @@
-import React, { useEffect, useState } from "react";
+import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 
-export default function AppOrders() {
-  const [info, setInfo] = useState({
-    hasWindow: false,
-    type: "unknown",
-    value: null,
-    error: null,
+// IMPORTANT: adjust this import to whatever your app uses.
+// In Shopify Remix template apps, it's usually "~/shopify.server".
+import { authenticate } from "~/shopify.server";
+
+export async function loader({ request }) {
+  const { admin } = await authenticate.admin(request);
+
+  // Fetch open orders (unfulfilled + not cancelled). You can tweak the query.
+  const resp = await admin.rest.resources.Order.all({
+    session: admin.session,
+    status: "open",
+    limit: 50,
   });
 
-  useEffect(() => {
-    try {
-      // Only runs in the browser
-      const ro = window.read_orders; // <-- IMPORTANT: reference via window
-      setInfo({
-        hasWindow: true,
-        type: typeof ro,
-        value: ro ?? null,
-        error: null,
-      });
-    } catch (e) {
-      setInfo({
-        hasWindow: true,
-        type: "error",
-        value: null,
-        error: String(e?.message ?? e),
-      });
-    }
-  }, []);
+  // Depending on library version, this may be resp.data / resp.body / resp
+  const orders = resp?.data ?? resp?.body?.orders ?? resp?.orders ?? resp;
 
-  return (
-    <div style={{ padding: 20 }}>
-      <h1>read_orders debug</h1>
-
-      <div>Client loaded: {String(info.hasWindow)}</div>
-      <div>typeof window.read_orders: {info.type}</div>
-
-      {info.error ? (
-        <pre style={{ whiteSpace: "pre-wrap", marginTop: 16 }}>
-          Error: {info.error}
-        </pre>
-      ) : (
-        <pre style={{ whiteSpace: "pre-wrap", marginTop: 16 }}>
-          {safeStringify(info.value)}
-        </pre>
-      )}
-    </div>
-  );
+  return json({ orders });
 }
 
-// Handles circular structures without crashing
-function safeStringify(value) {
-  try {
-    const seen = new WeakSet();
-    return JSON.stringify(
-      value,
-      (k, v) => {
-        if (typeof v === "object" && v !== null) {
-          if (seen.has(v)) return "[Circular]";
-          seen.add(v);
-        }
-        if (typeof v === "bigint") return v.toString();
-        return v;
-      },
-      2
-    );
-  } catch (e) {
-    return `<<could not stringify: ${String(e?.message ?? e)}>>`;
-  }
+export default function OrdersPage() {
+  const { orders } = useLoaderData();
+
+  return (
+    <div style={{ padding: 16 }}>
+      <h1>Open Orders</h1>
+
+      <ul>
+        {(orders ?? []).map((order) => (
+          <li key={order.id}>
+            <strong>{order.name ?? `#${order.order_number ?? order.id}`}</strong>
+
+            <ul>
+              {(order.line_items ?? []).map((li) => (
+                <li key={li.id}>
+                  {li.title ?? li.name ?? "(line item)"}
+                  {typeof li.quantity === "number" ? ` (qty: ${li.quantity})` : ""}
+
+                  <ul>
+                    {(li.properties ?? []).length ? (
+                      li.properties.map((p, idx) => (
+                        <li key={`${li.id}-prop-${idx}`}>
+                          {p?.name ?? "(name)"}: {String(p?.value ?? "")}
+                        </li>
+                      ))
+                    ) : (
+                      <li>(no properties)</li>
+                    )}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
