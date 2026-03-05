@@ -1,120 +1,158 @@
 // app.orders.jsx
-
 import React from "react";
 
-/**
- * Expects `read_orders` to be in scope (array).
- * Renders: Order -> Line Items -> Line Item Properties as nested <ul>.
- */
+function asArray(v) {
+  return Array.isArray(v) ? v : [];
+}
+
+function isTruthyDate(v) {
+  return v !== null && v !== undefined && String(v).trim() !== "";
+}
+
+function getOrderNumber(order) {
+  return (
+    order?.order_number ??
+    order?.orderNumber ??
+    order?.name ?? // GraphQL often "#1001"
+    order?.id ??
+    "(unknown order)"
+  );
+}
+
+// A more Shopify-REST-friendly "open" heuristic:
+// - not cancelled
+// - not closed
+// (optionally you can also require not fully fulfilled; see comment below)
+function isOpenOrder(order) {
+  const cancelledAt = order?.cancelled_at ?? order?.canceledAt ?? order?.cancelledAt;
+  const closedAt = order?.closed_at ?? order?.closedAt;
+
+  if (isTruthyDate(cancelledAt)) return false;
+  if (isTruthyDate(closedAt)) return false;
+
+  // Optional: treat fully fulfilled as not open (uncomment if you want)
+  // const fulfillmentStatus = (order?.fulfillment_status ?? order?.displayFulfillmentStatus ?? "")
+  //   .toString()
+  //   .toLowerCase();
+  // if (fulfillmentStatus === "fulfilled") return false;
+
+  return true;
+}
+
 export default function OrdersPage() {
-  // If read_orders is in scope, this will work.
-  // If you're in strict module scope and it's not global, you'll need to pass it as props or load it.
   const orders = typeof read_orders !== "undefined" ? read_orders : [];
+  const safeOrders = asArray(orders);
 
-  // "Open orders" can mean different things depending on your API.
-  // We'll consider orders "open" if:
-  // - status is "open" OR
-  // - closedAt is null/undefined OR
-  // - financial/fulfillment status indicates it's not completed
-  const openOrders = (Array.isArray(orders) ? orders : []).filter((o) => {
-    const status = (o?.status || o?.displayFulfillmentStatus || o?.fulfillment_status || "")
-      .toString()
-      .toLowerCase();
+  const openOrders = safeOrders.filter(isOpenOrder);
 
-    const closedAt = o?.closedAt ?? o?.closed_at;
-    if (status === "open") return true;
-    if (!closedAt) return true;
-
-    // fallback: if we can’t tell, keep it out unless it explicitly looks closed/cancelled
-    if (status.includes("cancel")) return false;
-    if (status.includes("closed")) return false;
-
-    return false;
-  });
-
-  if (!openOrders.length) {
-    return (
-      <div style={{ padding: 16 }}>
-        <h1>Open Orders</h1>
-        <p>No open orders found.</p>
-      </div>
-    );
-  }
+  // Debug: helps you see what the objects actually contain
+  const debugSample = safeOrders.slice(0, 5).map((o) => ({
+    order_number: o?.order_number,
+    name: o?.name,
+    status: o?.status,
+    closed_at: o?.closed_at,
+    closedAt: o?.closedAt,
+    cancelled_at: o?.cancelled_at,
+    canceledAt: o?.canceledAt,
+    fulfillment_status: o?.fulfillment_status,
+    displayFulfillmentStatus: o?.displayFulfillmentStatus,
+    financial_status: o?.financial_status,
+  }));
 
   return (
     <div style={{ padding: 16 }}>
       <h1>Open Orders</h1>
 
-      <ul>
-        {openOrders.map((order) => {
-          const orderNumber =
-            order?.order_number ??
-            order?.orderNumber ??
-            order?.name ?? // GraphQL often uses "name" like "#1001"
-            order?.id ??
-            "(unknown order)";
+      <div style={{ marginBottom: 12 }}>
+        <div><strong>Total orders:</strong> {safeOrders.length}</div>
+        <div><strong>Open orders (heuristic):</strong> {openOrders.length}</div>
+      </div>
 
-          const rawLineItems =
-            order?.line_items ??
-            order?.lineItems?.edges?.map((e) => e?.node) ??
-            order?.lineItems ??
-            [];
+      {/* Remove this block after you confirm the right fields */}
+      <details style={{ marginBottom: 16 }}>
+        <summary>Debug: sample order fields</summary>
+        <pre style={{ whiteSpace: "pre-wrap" }}>
+          {JSON.stringify(debugSample, null, 2)}
+        </pre>
+      </details>
 
-          const lineItems = Array.isArray(rawLineItems) ? rawLineItems : [];
-
-          return (
-            <li key={order?.id ?? String(orderNumber)}>
-              <strong>Order {orderNumber}</strong>
-
-              <ul>
-                {lineItems.length ? (
-                  lineItems.map((li, idx) => {
-                    const title = li?.title ?? li?.name ?? "(untitled item)";
-                    const qty = li?.quantity ?? li?.currentQuantity ?? li?.qty;
-
-                    // Shopify REST line_item properties: [{ name, value }]
-                    // Sometimes properties might be object-like or absent.
-                    const propsArray = Array.isArray(li?.properties)
-                      ? li.properties
-                      : li?.customAttributes?.edges?.map((e) => e?.node) ??
-                        li?.customAttributes ??
-                        [];
-
-                    const props = Array.isArray(propsArray) ? propsArray : [];
-
-                    return (
-                      <li key={li?.id ?? `${orderNumber}-${idx}`}>
-                        {title}
-                        {typeof qty !== "undefined" ? ` (qty: ${qty})` : ""}
-
-                        <ul>
-                          {props.length ? (
-                            props
-                              .filter(Boolean)
-                              .map((p, pIdx) => {
-                                const k = p?.name ?? p?.key ?? "(key)";
-                                const v = p?.value ?? "";
-                                return (
-                                  <li key={`${li?.id ?? idx}-prop-${pIdx}`}>
-                                    {k}: {String(v)}
-                                  </li>
-                                );
-                              })
-                          ) : (
-                            <li>(no properties)</li>
-                          )}
-                        </ul>
-                      </li>
-                    );
-                  })
-                ) : (
-                  <li>(no line items)</li>
-                )}
-              </ul>
-            </li>
-          );
-        })}
-      </ul>
+      {openOrders.length === 0 ? (
+        <>
+          <p>No open orders found by the current filter.</p>
+          <p style={{ marginTop: 8 }}>
+            To verify data is loading, here are <strong>all orders</strong> rendered below:
+          </p>
+          <OrdersTree orders={safeOrders} />
+        </>
+      ) : (
+        <OrdersTree orders={openOrders} />
+      )}
     </div>
+  );
+}
+
+function OrdersTree({ orders }) {
+  return (
+    <ul>
+      {orders.map((order) => {
+        const orderNumber = getOrderNumber(order);
+
+        const rawLineItems =
+          order?.line_items ??
+          order?.lineItems?.edges?.map((e) => e?.node) ??
+          order?.lineItems ??
+          [];
+
+        const lineItems = asArray(rawLineItems);
+
+        return (
+          <li key={order?.id ?? String(orderNumber)}>
+            <strong>Order {orderNumber}</strong>
+
+            <ul>
+              {lineItems.length ? (
+                lineItems.map((li, idx) => {
+                  const title = li?.title ?? li?.name ?? "(untitled item)";
+                  const qty = li?.quantity ?? li?.currentQuantity ?? li?.qty;
+
+                  const propsArray = Array.isArray(li?.properties)
+                    ? li.properties
+                    : li?.customAttributes?.edges?.map((e) => e?.node) ??
+                      li?.customAttributes ??
+                      [];
+
+                  const props = asArray(propsArray).filter(Boolean);
+
+                  return (
+                    <li key={li?.id ?? `${orderNumber}-${idx}`}>
+                      {title}
+                      {typeof qty !== "undefined" ? ` (qty: ${qty})` : ""}
+
+                      <ul>
+                        {props.length ? (
+                          props.map((p, pIdx) => {
+                            const k = p?.name ?? p?.key ?? "(key)";
+                            const v = p?.value ?? "";
+                            return (
+                              <li key={`${li?.id ?? idx}-prop-${pIdx}`}>
+                                {k}: {String(v)}
+                              </li>
+                            );
+                          })
+                        ) : (
+                          <li>(no properties)</li>
+                        )}
+                      </ul>
+                    </li>
+                  );
+                })
+              ) : (
+                <li>(no line items)</li>
+              )}
+            </ul>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
