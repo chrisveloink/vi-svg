@@ -1,7 +1,7 @@
 // app/routes/app.orders.jsx
 import React from "react";
 import { useLoaderData } from "react-router";
-import { authenticate } from "~/shopify.server"; // <-- adjust if needed
+import { authenticate } from "../shopify.server"; // <-- adjust if needed
 
 export async function loader({ request }) {
   const { admin } = await authenticate.admin(request);
