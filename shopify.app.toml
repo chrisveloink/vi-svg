@@ -2,7 +2,7 @@
 
 client_id = "16ec6a11b813a5b6fc9a35465d9a4e05"
 name = "vi-svg"
-application_url = "https://example.com"
+application_url = "https://vi-svg.onrender.com"
 embedded = true
 
 [build]
@@ -25,7 +25,7 @@ api_version = "2026-04"
 scopes = "write_metaobject_definitions,write_metaobjects,write_products"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://vi-svg.onrender.com/api/auth" ]
 
 [product.metafields.app.demo_info]
 type = "single_line_text_field"
